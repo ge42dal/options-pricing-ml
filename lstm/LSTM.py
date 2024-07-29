@@ -1,3 +1,5 @@
+import pathlib
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,19 +13,47 @@ import pandas as pd
 import numpy as np
 
 
-def get_train_test_tensors() -> (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor):
-    path_to_data = Path(__file__).parent.parent / "clean_data" / "options_free_dataset.csv"
-    data = pd.read_csv(path_to_data)
+def preprocess_data(path_options: pathlib.Path, path_underlying: pathlib.Path) -> (
+pd.DataFrame, pd.DataFrame, pd.DataFrame):
+    days_to_roll = 20
 
-    X = data.drop(['Option_Average_Price'])
+    options_data = pd.read_csv(path_options)
+    underlying_data = pd.read_csv(path_underlying)
+
+    options_data.drop(['Sigma_20_Days_Annualized', "Underlying_Price", "bid_eod", "ask_eod"], axis=1, inplace=True)
+
+    # creation of 20 day time series (n,m) matrix to feed in to LSTM layer, where n are individual sample prices of
+    # the underlying at different dates, and m represent the previous 20 days from most recent to furthest back
+    padded = np.insert(underlying_data[" Close"].values, 0,
+                       np.array([np.nan] * days_to_roll))
+    list_of_rolled = [np.roll(padded, i) for i in range(days_to_roll)]
+    stacked = np.column_stack(list_of_rolled)
+    stacked = pd.DataFrame(stacked).dropna(axis=0).reset_index(drop=True)
+    relevant_dates = underlying_data['Date'].iloc[days_to_roll - 1:underlying_data.size].reset_index(drop=True)
+    stacked = pd.concat([relevant_dates, stacked], axis=1)
+
+    stacked = stacked.set_index('Date')
+    options_data = options_data.set_index('QuoteDate')
+    joined_df = options_data.join(stacked)
+    joined_df.dropna(axis=0, inplace=True)
+    final_df = joined_df.apply(pd.to_numeric, errors='ignore')
+
+    calls_df = final_df[final_df['OptionType'] == 'c'].drop(columns='OptionType')
+    put_df = final_df[final_df['OptionType'] == 'p'].drop(columns='OptionType')
+
+    return final_df, calls_df, put_df
+
+
+def get_train_test_split(data: pd.DataFrame) -> (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor):
+    X = data.drop(columns=['Option_Average_Price'])
     y = data['Option_Average_Price']
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=True)
 
-    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
+    X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
+    y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).view(-1, 1)
+    X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).view(-1, 1)
 
     return X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor
 
@@ -55,8 +85,8 @@ class LSTMTrain(nn.Module):
         return x
 
 
-
-def training_loop(epochs: int, model: nn.Module, optim: Adam, X_train: torch.Tensor, y_train: torch.Tensor):  # why did we pick adam
+def training_loop(epochs: int, model: nn.Module, optim: Adam, X_train: torch.Tensor,
+                  y_train: torch.Tensor):
     for epoch in range(epochs):
         model.train()
         optim.zero_grad()
@@ -68,42 +98,12 @@ def training_loop(epochs: int, model: nn.Module, optim: Adam, X_train: torch.Ten
         optim.step()
 
 
-
 if __name__ == "__main__":
-
     path_to_options_data = Path(__file__).parent.parent / "clean_data" / "options_free_dataset.csv"
-    options_data = pd.read_csv(path_to_options_data)
 
     path_to_underlying_data = Path(__file__).parent.parent / "clean_data" / "underlying.csv"
-    underlying_data = pd.read_csv(path_to_underlying_data)
 
-    # creation of 20 day time series (n,m) matrix to feed in to LSTM layer, where n are individual sample prices of
-    # the underlying at different dates, and m represent the previous 20 days from most recent to furthest back
-    days_to_roll = 20
-    padded = np.insert(underlying_data[" Close"].values, 0,
-                       np.array([np.nan] * days_to_roll))
-    list_of_rolled = [np.roll(padded, i) for i in range(days_to_roll)]
-    stacked = np.column_stack(list_of_rolled)
-    stacked = pd.DataFrame(stacked).dropna(axis=0).reset_index(drop=True)
-    relevant_dates = underlying_data['Date'].iloc[days_to_roll-1:underlying_data.size].reset_index(drop=True)
-    stacked = pd.concat([relevant_dates,stacked], axis=1)
-    stacked = stacked.set_index('Date')
-    options_data = options_data.set_index('QuoteDate')
-    joined_df = pd.concat([options_data, stacked], axis=1)
+    final_df, calls_df, puts_df = preprocess_data(path_to_options_data, path_to_underlying_data)
 
 
-    options_data.drop(['QuoteDate'], axis=1, inplace=True)
-    options_data.drop(['Sigma_20_Days_Annualized', "Underlying_Price", "bid_eod", "ask_eod"], axis=1, inplace=True)
-
-    underlying_var = underlying_data['Sigma_20_Days_Annualized']
-    fc_features = options_data.drop(['Sigma_20_Days_Annualized'], axis=1)
-
-    full_data_set = fc_features.join(underlying_var, on='QuoteDate')
-
-
-    data_puts = options_data[options_data['OptionType'] == 'p']
-    data_calls = options_data[options_data['OptionType'] == 'c']
-
-    X_train, X_test, y_train, y_test = get_train_test_tensors()
-
-    pass
+    cX_train, cX_test, cy_train, cy_test = get_train_test_split(calls_df)
