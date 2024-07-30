@@ -55,7 +55,7 @@ def get_train_test_split(data: pd.DataFrame) -> (np.array, np.array, np.array, n
 
 class LSTMTrain(nn.Module):
 
-    def __init__(self, input_size=1, hidden_size=50, num_layers=1, output_size=1, n_features=4, n_neurons=50):
+    def __init__(self, input_size=1, hidden_size=50, num_layers=4, output_size=1, n_features=4, n_neurons=50):
         super().__init__()
         self.num_layers = num_layers
         self.hidden_size = hidden_size
@@ -67,20 +67,26 @@ class LSTMTrain(nn.Module):
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc_lstm = nn.Linear(hidden_size, output_size)
 
-        self.fc1 = nn.Linear(hidden_size, n_neurons)
+        self.fc1 = nn.Linear(n_features, n_neurons)
         self.fc2 = nn.Linear(n_neurons, n_neurons)
         self.fc3 = nn.Linear(n_neurons, n_neurons)
         self.fc4 = nn.Linear(n_neurons, output_size)
 
         self.ReLU = nn.ReLU()
 
-    def forward(self, x_lstm, x_dense=0):
+    def forward(self, x_lstm, x_dense):
         lstm_out = self.lstm_part(x_lstm)
-
-        return None
+        dense_input = torch.cat((lstm_out, x_dense), 1)
+        dense_out = self.dense_part(dense_input)
+        return dense_out
 
     def dense_part(self, x):
-        pass
+        fc1 = self.fc1(x)
+        fc2 = self.fc2(fc1)
+        fc3 = self.fc3(fc2)
+        fc4 = self.fc4(fc3)
+        return fc4
+
     def lstm_part(self, x):
         batch_size = x.size(0)  # 26205 total dates of prices
         h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size)  # (1, 26205, 50)
@@ -91,20 +97,23 @@ class LSTMTrain(nn.Module):
         return self.fc_lstm(out[:, -1, :])  # pass last lstm to fc with output 1, to get 1 time series
 
 
+
 def training_loop(epochs: int, model: nn.Module, X_train: pd.DataFrame,
                   y_train: pd.DataFrame):
     lstm_part_tensor = torch.tensor(X_train.drop(columns=['strike', 'Time_to_Maturity', 'RF_Rate']).values,
                                     dtype=torch.float32)
     dense_part = torch.tensor(X_train[['strike', 'Time_to_Maturity', 'RF_Rate']].values, dtype=torch.float32)
+    true = torch.tensor(y_train.values, dtype=torch.float32)
     loss_vec = np.zeros(epochs)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_fn = torch.nn.MSELoss()
     for epoch in range(epochs):
+
         model.train()
         optimizer.zero_grad()
 
         pred = model(lstm_part_tensor, dense_part)
-        loss = loss_fn(pred, y_train)
+        loss = loss_fn(pred, true)
 
         optimizer.zero_grad()
         loss.backward()
@@ -121,4 +130,4 @@ if __name__ == "__main__":
     X_train, cX_test, cy_train, cy_test = get_train_test_split(calls_df)
 
     model = LSTMTrain()
-    training_loop(1, model, X_train=X_train, y_train=cy_train)
+    training_loop(20, model, X_train=X_train, y_train=cy_train)
