@@ -14,7 +14,7 @@ import numpy as np
 
 
 def preprocess_data(path_options: pathlib.Path, path_underlying: pathlib.Path) -> (
-pd.DataFrame, pd.DataFrame, pd.DataFrame):
+        pd.DataFrame, pd.DataFrame, pd.DataFrame):
     days_to_roll = 20
 
     options_data = pd.read_csv(path_options)
@@ -44,58 +44,72 @@ pd.DataFrame, pd.DataFrame, pd.DataFrame):
     return final_df, calls_df, put_df
 
 
-def get_train_test_split(data: pd.DataFrame) -> (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor):
+def get_train_test_split(data: pd.DataFrame) -> (np.array, np.array, np.array, np.array):
     X = data.drop(columns=['Option_Average_Price'])
     y = data['Option_Average_Price']
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=True)
 
-    X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).view(-1, 1)
-    X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).view(-1, 1)
-
-    return X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor
+    return X_train, X_test, y_train, y_test
 
 
 class LSTMTrain(nn.Module):
 
-    def __init__(self, input_size, hidden_size, num_layers, output_size, n_features, n_units):
+    def __init__(self, input_size=1, hidden_size=50, num_layers=1, output_size=1, n_features=4, n_neurons=50):
         super().__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+        self.input_size = input_size
+        self.output_size = output_size
+        self.n_features = n_features
+        self.n_neurons = n_neurons
 
-        self.fc1 = nn.Linear(hidden_size + n_features, n_units)
-        self.fc2 = nn.Linear(n_units, output_size)
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc_lstm = nn.Linear(hidden_size, output_size)
+
+        self.fc1 = nn.Linear(hidden_size, n_neurons)
+        self.fc2 = nn.Linear(n_neurons, n_neurons)
+        self.fc3 = nn.Linear(n_neurons, n_neurons)
+        self.fc4 = nn.Linear(n_neurons, output_size)
 
         self.ReLU = nn.ReLU()
 
-    def forward(self, var, fc_features):
-        batch_size = var.size(0)
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size)
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size)
+    def forward(self, x_lstm, x_dense=0):
+        lstm_out = self.lstm_part(x_lstm)
 
-        out, _ = self.lstm(input, (h0, c0))
-        out = out[:, -1, :]
+        return None
 
-        x = torch.cat((var, fc_features), dim=1)
+    def dense_part(self, x):
+        pass
+    def lstm_part(self, x):
+        batch_size = x.size(0)  # 26205 total dates of prices
+        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size)  # (1, 26205, 50)
+        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size)  # (1, 26205, 50)
 
-        x = self.fc1(out)
-        x = self.ReLU(x)
-        x = self.fc2(x)
-        return x
+        x = x.unsqueeze(-1) # (26205, 20, 1)
+        out, _ = self.lstm(x, (h0, c0))  # (26205, 20, 50) # chose 50 so that lstm could learn more complex patterns
+        return self.fc_lstm(out[:, -1, :])  # pass last lstm to fc with output 1, to get 1 time series
 
 
-def training_loop(epochs: int, model: nn.Module, optim: Adam, X_train: torch.Tensor,
-                  y_train: torch.Tensor):
+def training_loop(epochs: int, model: nn.Module, X_train: pd.DataFrame,
+                  y_train: pd.DataFrame):
+    lstm_part_tensor = torch.tensor(X_train.drop(columns=['strike', 'Time_to_Maturity', 'RF_Rate']).values,
+                                    dtype=torch.float32)
+    dense_part = torch.tensor(X_train[['strike', 'Time_to_Maturity', 'RF_Rate']].values, dtype=torch.float32)
+    loss_vec = np.zeros(epochs)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    loss_fn = torch.nn.MSELoss()
     for epoch in range(epochs):
         model.train()
-        optim.zero_grad()
+        optimizer.zero_grad()
 
-        output = model(X_train.unsqueeze(1))
-        loss = F.mse_loss(output, y_train)
+        pred = model(lstm_part_tensor, dense_part)
+        loss = loss_fn(pred, y_train)
 
+        optimizer.zero_grad()
         loss.backward()
-        optim.step()
+        optimizer.step()
+        loss_vec[epoch] += loss.item()
 
 
 if __name__ == "__main__":
@@ -104,6 +118,7 @@ if __name__ == "__main__":
     path_to_underlying_data = Path(__file__).parent.parent / "clean_data" / "underlying.csv"
 
     final_df, calls_df, puts_df = preprocess_data(path_to_options_data, path_to_underlying_data)
+    X_train, cX_test, cy_train, cy_test = get_train_test_split(calls_df)
 
-
-    cX_train, cX_test, cy_train, cy_test = get_train_test_split(calls_df)
+    model = LSTMTrain()
+    training_loop(1, model, X_train=X_train, y_train=cy_train)
