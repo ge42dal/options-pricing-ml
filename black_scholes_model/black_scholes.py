@@ -38,15 +38,18 @@ def put_price(row):
 
 if __name__ == "__main__":
     options_data = pd.read_csv('../clean_data/options_free_dataset.csv')
-
+    # necessary to ensure we're feeding the same data from lstm to the BSM
+    unique_dates_lstm = pd.Series(pd.read_csv('unique_dates_lstm.csv')['0'])
+    mask = options_data['QuoteDate'].isin(unique_dates_lstm.values)
+    options_data = options_data.loc[mask]
     calls = options_data[options_data['OptionType'] == 'c']
     puts = options_data[options_data['OptionType'] == 'p']
 
     calls['Predicted_Call_price'] = calls.apply(call_price, axis=1)
     puts['Predicted_Put_Price'] = puts.apply(put_price, axis=1)
 
-    cmse, crmse, cmae, cmape, cr2 = calculate_metrics(calls['bid_eod'], calls['Predicted_Call_price'])
-    pmse, prmse, pmae, pmape, pr2 = calculate_metrics(puts['ask_eod'], puts['Predicted_Put_Price'])
+    cmse, crmse, cmae, cmape, cr2 = calculate_metrics(calls['Option_Average_Price'], calls['Predicted_Call_price'])
+    pmse, prmse, pmae, pmape, pr2 = calculate_metrics(puts['Option_Average_Price'], puts['Predicted_Put_Price'])
 
     metrics = {
         'Metric': ['MSE', 'RMSE', 'MAE', 'MAPE', 'R2'],
