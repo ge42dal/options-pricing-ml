@@ -17,25 +17,29 @@ import numpy as np
 from utils.utlis import calculate_metrics
 
 
+def pp_get_rel_cols_and_ot(options_data: pd.DataFrame, option_type: str) ->pd.DataFrame:
+    """
+    Pre-processing: get relevant columns and option type
+    :param options_data: options df to be processed
+    :param option_type: option type 'c' for calls, 'p' of puts
+    :return: a dataframe where sigma, S_option, bid price, ask price, are removed
+    """
+    options_data.drop(['Sigma_20_Days_Annualized', "Underlying_Price", "bid_eod", "ask_eod"], axis=1,
+                      inplace=True)
+    options_data = options_data[options_data['OptionType'] == option_type]
+    return options_data
+
 def preprocess_data(path_options: pathlib.Path, path_underlying: pathlib.Path, option_type: str) -> (
         pd.DataFrame, pd.DataFrame, pd.DataFrame):
     days_to_roll = 20
 
     options_data = pd.read_csv(path_options)
     underlying_data = pd.read_csv(path_underlying)
-    if option_type == 'c':
-        options_data.drop(['Sigma_20_Days_Annualized', "Underlying_Price", "ask_eod", "Option_Average_Price"], axis=1, inplace=True)
-        options_data = options_data[options_data['OptionType'] =='c']
+    pp_get_rel_cols_and_ot(options_data, option_type)
 
-    elif option_type == 'p':
-        options_data.drop(['Sigma_20_Days_Annualized', "Underlying_Price", "bid_eod", "Option_Average_Price"], axis=1,
-                          inplace=True)
-        options_data = options_data[options_data['OptionType'] == 'p']
-    else:
-        raise ValueError('Option type must be c or p')
     # creation of 20 day time series (n,m) matrix to feed in to LSTM layer, where n are individual sample prices of
     # the underlying at different dates, and m represent the previous 20 days from most recent to furthest back
-    padded = np.insert(underlying_data[" Close"].values, 0,
+    padded = np.insert(underlying_data["Close"].values, 0,
                        np.array([np.nan] * days_to_roll))
     list_of_rolled = [np.roll(padded, i) for i in range(days_to_roll)]
     stacked = np.column_stack(list_of_rolled)
@@ -45,23 +49,19 @@ def preprocess_data(path_options: pathlib.Path, path_underlying: pathlib.Path, o
 
     stacked = stacked.set_index('Date')
     options_data = options_data.set_index('QuoteDate')
-    joined_df = options_data.join(stacked)
+    joined_df = options_data.join(stacked, on='QuoteDate')
     joined_df.dropna(axis=0, inplace=True)
     final_df = joined_df.apply(pd.to_numeric, errors='ignore')
+    final_df = final_df[final_df['OptionType'] == option_type]
     final_df.drop(columns=['OptionType'], inplace=True)
     return final_df
 
-def get_train_test_split(data: pd.DataFrame, option_type: str) -> (np.array, np.array, np.array, np.array):
-    if option_type == 'c':
-        X = data.drop(columns=['bid_eod'])
-        y = data['bid_eod']
-    elif option_type == 'p':
-        X = data.drop(columns=['ask_eod'])
-        y = data['ask_eod']
-    else:
-        raise ValueError('Option type must be c or p')
+def get_train_test_split(data: pd.DataFrame) -> (np.array, np.array, np.array, np.array):
+    X = data.drop(columns=['Option_Average_Price'])
+    y = data['Option_Average_Price']
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, shuffle=True)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
 
     return X_train, X_test, y_train, y_test
 
@@ -135,8 +135,8 @@ def training_loop(epochs: int, model: nn.Module, X_train: pd.DataFrame,
 
     train_dataset = TensorDataset(lstm_train_tensor, dense_train_tensor,  train_targets)
     test_dataset = TensorDataset(lstm_test_tensor, dense_test_tensor, test_targets)
-    train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)  # 32 has the best time to MSE score payoff
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     loss_fn = torch.nn.MSELoss()
@@ -148,7 +148,6 @@ def training_loop(epochs: int, model: nn.Module, X_train: pd.DataFrame,
         adjust_learning_rate(optimizer, epoch)
         train_loss = 0.0
         for lstm_batch, dense_batch, target_batch in train_loader:
-            optimizer.zero_grad()
             pred = model(lstm_batch, dense_batch)
             loss = loss_fn(pred, target_batch.unsqueeze(1))  # modified shape because threw errors
             loss.backward()
@@ -199,13 +198,13 @@ def adjust_learning_rate(optimizer, epoch):
 if __name__ == "__main__":
     path_to_options_data = Path(__file__).parent.parent / "clean_data" / "options_free_dataset.csv"
 
-    path_to_underlying_data = Path(__file__).parent.parent / "clean_data" / "underlying.csv"
+    path_to_underlying_data = Path(__file__).parent.parent / "clean_data" / "data_spx_18_19.csv"
 
     calls_df = preprocess_data(path_to_options_data, path_to_underlying_data, option_type='c')
-    cX_train, cX_test, cy_train, cy_test = get_train_test_split(calls_df, option_type='c')
+    cX_train, cX_test, cy_train, cy_test = get_train_test_split(calls_df)
 
     model = LSTMTrain()
-    model_trained = training_loop(30, model, X_train=cX_train, y_train=cy_train, X_test=cX_test, y_test=cy_test)
+    model_trained = training_loop(20, model, X_train=cX_train, y_train=cy_train, X_test=cX_test, y_test=cy_test)
 
 
     torch.save(model_trained.state_dict(), './model_trained.pth')
