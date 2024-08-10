@@ -22,12 +22,12 @@ def prep_get_rel_cols_and_ot(options_data: pd.DataFrame, option_type: str) -> pd
     """
     Pre-processing: get relevant columns and option type
     :param options_data: options df to be processed
-    :param option_type: option type 'c' for calls, 'p' of puts
+    :param option_type: option type 'call' for calls, 'put' of puts
     :return: a dataframe where sigma, S_option, bid price, ask price, are removed
     """
-    options_data.drop(['Sigma_20_Days_Annualized', "Underlying_Price", "bid_eod", "ask_eod"], axis=1,
+    options_data.drop(['sigma', " Close", "bid", "ask"], axis=1,
                       inplace=True)
-    options_data = options_data[options_data['OptionType'] == option_type]
+    options_data = options_data[options_data['call_put'] == option_type]
     return options_data
 
 
@@ -140,8 +140,8 @@ def dataset_data_loader(X_train: pd.DataFrame,
     test_targets = torch.tensor(y_test.values, dtype=torch.float32)
     train_dataset = TensorDataset(lstm_train_tensor, dense_train_tensor, train_targets)
     test_dataset = TensorDataset(lstm_test_tensor, dense_test_tensor, test_targets)
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)  # 32 has the best time to MSE score payoff
-    test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)  # 32 has the best time to MSE score payoff
+    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
     return train_dataset, test_dataset, train_loader, test_loader
 
 
