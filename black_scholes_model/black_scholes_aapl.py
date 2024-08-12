@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_squared_error
@@ -38,10 +40,6 @@ def put_price(row):
 
 if __name__ == "__main__":
     options_data = pd.read_csv('../clean_data/aapl_preprocessed.csv')
-    # necessary to ensure we're feeding the same data from lstm to the BSM
-    # unique_dates_lstm = pd.Series(pd.read_csv('unique_dates_lstm.csv')['0'])
-    # mask = options_data['QuoteDate'].isin(unique_dates_lstm.values)
-    # options_data = options_data.loc[mask]
     calls = options_data[options_data['call_put'] == 'Call']
     puts = options_data[options_data['call_put'] == 'Put']
 
@@ -59,6 +57,19 @@ if __name__ == "__main__":
     pe5 = pex(pe, 5)
     pe10 = pex(pe, 10)
     pe20 = pex(pe, 20)
+
+    metrics = {
+        'mse': str(mse),
+        'bias': str(bias),
+        'aape': str(aape),
+        'mape': str(mape),
+        'pe5': str(pe5),
+        'pe10': str(pe10),
+        'pe20': str(pe20)
+    }
+
+    with open('call_results_bsm.json', 'w') as fp:
+        json.dump(metrics, fp)
 
     print('Call Metrics: \n'
           f'mse: {mse}\n'
@@ -80,6 +91,19 @@ if __name__ == "__main__":
     pe5 = pex(pe, 5)
     pe10 = pex(pe, 10)
     pe20 = pex(pe, 20)
+
+    metrics = {
+        'mse': str(mse),
+        'bias': str(bias),
+        'aape': str(aape),
+        'mape': str(mape),
+        'pe5': str(pe5),
+        'pe10': str(pe10),
+        'pe20': str(pe20)
+    }
+
+    with open('put_results_bsm.json', 'w') as fp:
+        json.dump(metrics, fp)
 
     print('Put Metrics: \n'
           f'mse: {mse}\n'

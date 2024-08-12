@@ -80,7 +80,7 @@ if __name__ == "__main__":
     # drop inf values
     data.reset_index(inplace=True)
     data.drop(index=[41428, 42966], inplace=True)
-    data.to_csv(Path(__file__).parent.parent / 'clean_data' / 'aapl_preprocessed.csv')
+    data.to_csv(Path(__file__).parent.parent / 'clean_data' / 'aapl_preprocessed.csv', index=False)
 
     plt.figure(figsize=(16, 8), dpi=150)
     plt.scatter(pd.to_datetime(data['date']), data['ask'], label='ask', marker='_', color='orange', alpha=0.6)
