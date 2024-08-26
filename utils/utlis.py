@@ -7,7 +7,7 @@ def pex(pe, x):
     """
 
     :param pe: percent error
-    :param x: predictions that fill within +-X % of actual
+    :param x: predictions that fall within +-X % of actual
     :return: percentage of observations within actual price
     """
     within_X_percent = np.abs(pe) <= x

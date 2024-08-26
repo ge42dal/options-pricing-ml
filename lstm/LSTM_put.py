@@ -128,7 +128,6 @@ def training_loop(epochs: int, model: nn.Module, train_loader: DataLoader, test_
     test_loss_vec = np.zeros(epochs)
 
     for epoch in tqdm(range(epochs), desc='Epochs'):
-        # adjust_learning_rate(optimizer, epoch)
         train_loss = 0.0
         model.train()
         for lstm_batch, dense_batch, target_batch in train_loader:
