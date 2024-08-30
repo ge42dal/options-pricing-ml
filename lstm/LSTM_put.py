@@ -46,8 +46,9 @@ def get_train_test_split(data: pd.DataFrame) -> (np.array, np.array, np.array, n
 
 class LSTMTrain(nn.Module):
     # initially, puts had a stronger tendency for overfitting
+    #with puts i had a clear example of the bias-variance tradeoff
     def __init__(self, lstm_input_size=1, lstm_hidden_size=20, lstm_n_layers=3, output_size=1, fc_n_features=4,
-                 fc_n_neurons=100):
+                 fc_n_neurons=80):
         super().__init__()
         self.num_layers = lstm_n_layers
         self.hidden_size = lstm_hidden_size
@@ -159,7 +160,7 @@ def training_loop(epochs: int, model: nn.Module, train_loader: DataLoader, test_
     plt.figure(figsize=(10, 6))
     plt.plot(range(1, epochs + 1), np.log(train_loss_vec), label='Training Loss')
     plt.plot(range(1, epochs + 1), np.log(test_loss_vec), label='Validation Loss')
-    plt.title('LSTM Call Loss')
+    plt.title('LSTM Put Loss')
     plt.xlabel('Epoch')
     plt.ylabel('log(MSE)')
     plt.legend()
